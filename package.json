@@ -1,0 +1,29 @@
+{
+  "name": "wezterm-config-tool",
+  "version": "1.0.0",
+  "description": "WezTerm 配置可视化工具：浏览器内可视化配置、实时预览，并通过零依赖本地后端管理真实终端配置（程序匹配 / 背景图 / 快捷键等）。",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node gen_test.js"
+  },
+  "keywords": [
+    "wezterm",
+    "terminal",
+    "config",
+    "lua",
+    "gui"
+  ],
+  "author": "BaiWoww <q1092174474@163.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BaiWoww/wezterm-config-tool.git"
+  },
+  "devDependencies": {
+    "luaparse": "^0.3.1"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}

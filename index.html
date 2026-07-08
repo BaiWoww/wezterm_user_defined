@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WezTerm 配置工具</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">⚡</span>
+      <div>
+        <h1>WezTerm 配置工具</h1>
+        <p class="sub">可视化编辑 · 实时预览 · 兼容官方 Lua 配置格式</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button id="importBtn" class="btn ghost">导入 wezterm.lua</button>
+      <button id="downloadBtn" class="btn primary">导出配置</button>
+      <input type="file" id="importFile" accept=".lua,.luarc,*.wezterm.lua" hidden />
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- 左侧导航 -->
+    <nav class="sidebar">
+      <button class="nav-item active" data-tab="appearance">🎨 终端外观</button>
+      <button class="nav-item" data-tab="keys">⌨️ 快捷键</button>
+      <button class="nav-item" data-tab="other">🧩 其他配置</button>
+      <button class="nav-item" data-tab="io">📂 导入 / 导出</button>
+      <div class="sidebar-spacer"></div>
+      <button id="resetAllBtn" class="btn ghost small">恢复默认</button>
+    </nav>
+
+    <!-- 中间设置区 -->
+    <main class="content">
+      <!-- 外观 -->
+      <section id="tab-appearance" class="panel active">
+        <h2>终端外观</h2>
+        <p class="panel-hint">设置背景图片、窗口透明度、亮度与对比度，右侧预览实时更新。</p>
+
+        <div class="card">
+          <div class="field">
+            <label>背景图片</label>
+            <div class="row">
+              <input type="text" id="bgImagePath" placeholder="选择本地图片路径…" />
+              <button id="bgImageBtn" class="btn small">选择图片</button>
+            </div>
+            <input type="file" id="bgImageFile" accept="image/*" hidden />
+            <p class="help" id="bgImageHelp"></p>
+          </div>
+
+          <div class="field">
+            <label>窗口透明度 <span class="val" id="opacityVal">1.00</span></label>
+            <input type="range" id="opacity" min="0.1" max="1" step="0.01" value="1" />
+            <p class="help">对应 <code>window_background_opacity</code>（0.1 – 1.0）</p>
+          </div>
+
+          <div class="field">
+            <label>背景亮度 <span class="val" id="brightnessVal">1.00</span></label>
+            <input type="range" id="brightness" min="0" max="2" step="0.01" value="1" />
+            <p class="help">对应 HSB 的 <code>brightness</code> 倍率</p>
+          </div>
+
+          <div class="field">
+            <label>背景对比度（饱和度）<span class="val" id="saturationVal">1.00</span></label>
+            <input type="range" id="saturation" min="0" max="2" step="0.01" value="1" />
+            <p class="help">对应 HSB 的 <code>saturation</code> 倍率</p>
+          </div>
+
+          <div class="field">
+            <label>色相 <span class="val" id="hueVal">1.00</span></label>
+            <input type="range" id="hue" min="0" max="1" step="0.01" value="1" />
+            <p class="help">对应 HSB 的 <code>hue</code> 倍率</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 快捷键 -->
+      <section id="tab-keys" class="panel">
+        <h2>快捷键自定义</h2>
+        <p class="panel-hint">点击下方「录制」按钮后按下组合键，系统会自动识别按键并生成配置。所有绑定写入 <code>config.keys</code>。</p>
+        <div id="keysList" class="keys-list"></div>
+        <button id="addKeyBtn" class="btn small">+ 添加快捷键</button>
+      </section>
+
+      <!-- 其他配置 -->
+      <section id="tab-other" class="panel">
+        <h2>其他配置项</h2>
+        <p class="panel-hint">字体、配色方案、窗口尺寸、光标样式等常见配置。</p>
+
+        <div class="card">
+          <h3>字体</h3>
+          <div class="field">
+            <label>字体名称</label>
+            <input type="text" id="fontFamily" list="fontList" placeholder="如 JetBrains Mono" />
+            <datalist id="fontList"></datalist>
+            <p class="help">名称需与本机已安装字体一致，对应 <code>config.font</code></p>
+          </div>
+          <div class="field">
+            <label>字体大小</label>
+            <input type="number" id="fontSize" min="6" max="72" step="0.5" value="12" />
+            <p class="help">对应 <code>config.font_size</code></p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>配色方案</h3>
+          <div class="field">
+            <label>方案名称</label>
+            <input type="text" id="colorScheme" list="schemeList" placeholder="如 GitHub Dark" />
+            <datalist id="schemeList"></datalist>
+            <p class="help">对应内置方案 <code>config.color_scheme</code></p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>窗口尺寸</h3>
+          <div class="row two">
+            <div class="field">
+              <label>初始行数</label>
+              <input type="number" id="initialRows" min="10" max="200" step="1" value="40" />
+            </div>
+            <div class="field">
+              <label>初始列数</label>
+              <input type="number" id="initialCols" min="20" max="400" step="1" value="120" />
+            </div>
+          </div>
+          <p class="help">对应 <code>config.initial_rows</code> / <code>config.initial_cols</code></p>
+          <div class="field">
+            <label>窗口装饰</label>
+            <select id="windowDecorations">
+              <option value="RESIZE">RESIZE（可调整边框）</option>
+              <option value="TITLE">TITLE（仅标题栏）</option>
+              <option value="NONE">NONE（无边框）</option>
+            </select>
+            <p class="help">对应 <code>config.window_decorations</code></p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>光标</h3>
+          <div class="row two">
+            <div class="field">
+              <label>光标样式</label>
+              <select id="cursorStyle">
+                <option value="BlinkingBlock">BlinkingBlock</option>
+                <option value="SteadyBlock">SteadyBlock</option>
+                <option value="BlinkingUnderline">BlinkingUnderline</option>
+                <option value="SteadyUnderline">SteadyUnderline</option>
+                <option value="BlinkingBar">BlinkingBar</option>
+                <option value="SteadyBar">SteadyBar</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>光标粗细</label>
+              <div class="row">
+                <input type="number" id="cursorThickness" min="0.5" max="20" step="0.5" value="2" />
+                <select id="cursorThicknessUnit">
+                  <option value="raw">数值(px)</option>
+                  <option value="px">px</option>
+                  <option value="pt">pt</option>
+                  <option value="%">%</option>
+                  <option value="cell">cell</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="field checkbox">
+            <label><input type="checkbox" id="cursorBlink" /> 启用光标闪烁</label>
+            <p class="help">闪烁开关会写入 <code>config.default_cursor_style</code> 的 <code>Blinking*</code> / <code>Steady*</code> 前缀（WezTerm 无独立的 <code>cursor_blink</code> 字段）</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 导入导出 -->
+      <section id="tab-io" class="panel">
+        <h2>导入 / 导出</h2>
+        <p class="panel-hint">读取现有 <code>wezterm.lua</code>，修改后导出为有效 Lua 配置，可覆盖或保存到指定路径。</p>
+
+        <div class="card">
+          <div class="row two">
+            <button id="ioImportBtn" class="btn">导入现有配置</button>
+            <button id="sampleBtn" class="btn ghost">加载示例配置</button>
+          </div>
+          <div class="field" style="margin-top:12px">
+            <label>目标路径（建议保存位置）</label>
+            <input type="text" id="targetPath" placeholder="C:\Users\你的用户名\.wezterm.lua" />
+            <p class="help">浏览器中通过「保存到文件」可直接写入该路径；「下载」则将文件保存到下载目录。</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <label>生成的 Lua 配置预览</label>
+          <textarea id="exportText" spellcheck="false" readonly></textarea>
+          <div class="row" style="margin-top:10px">
+            <button id="saveBtn" class="btn primary">保存到文件…</button>
+            <button id="dlBtn2" class="btn">下载 wezterm.lua</button>
+            <button id="copyBtn" class="btn ghost">复制</button>
+          </div>
+        </div>
+
+        <!-- 程序匹配：后端直连 WT 安装 -->
+        <div class="card" id="matchCard">
+          <h3>程序匹配（后端直连 WT）</h3>
+          <p class="help">通过本地后端（<code>node server.js</code>）直接访问本机 WezTerm：点击「自动检测」定位安装与配置文件，或手动填写路径后「定位」。写入前自动备份原文件，无需手动导出或覆盖旧文件。<br>⚠️ 请先运行 <code>node server.js</code>，并通过 <code>http://127.0.0.1:8765</code> 打开本页（直接双击打开本地文件会导致后端连接失败）。</p>
+          <div class="row two">
+            <button id="detectBtn" class="btn">自动检测 WT 路径</button>
+            <button id="applyMatchBtn" class="btn primary" disabled>应用到程序</button>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <button id="pingBtn" class="btn small ghost">测试后端连接</button>
+            <span id="pingStatus" class="help" style="margin:0">未检测</span>
+          </div>
+          <div class="field" style="margin-top:12px">
+            <label>WT 安装 / 配置路径（可手动填写目录或文件）</label>
+            <div class="row">
+              <input type="text" id="matchPathInput" placeholder="留空则自动检测，或填写安装目录 / 配置文件路径" />
+              <button id="resolveBtn" class="btn small">定位</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>安装目录</label>
+            <input type="text" id="matchDirName" placeholder="未检测" readonly />
+          </div>
+          <div class="field">
+            <label>定位到的目标配置文件</label>
+            <input type="text" id="matchTargetFile" placeholder="自动定位中…" readonly />
+          </div>
+        </div>
+
+        <div id="status" class="status"></div>
+      </section>
+    </main>
+
+    <!-- 右侧实时预览 -->
+    <aside class="preview-pane">
+      <div class="preview-head">
+        <span>实时预览</span>
+        <span class="preview-meta" id="previewMeta"></span>
+      </div>
+      <div class="preview-stage" id="previewStage">
+        <div class="fake-desktop"></div>
+        <div class="term-window" id="termWindow">
+          <div class="term-titlebar" id="termTitlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title-text">wezterm</span></div>
+          <div class="term-bg" id="termBg"></div>
+          <div class="term-content" id="termContent">
+            <div class="pline"><span class="u">user@wezterm</span>:<span class="p">~</span>$ <span class="cmd">ls -la --color=auto</span></div>
+            <div><span class="b">drwxr-xr-x</span>  <span class="c">config</span>  <span class="y">docs</span>  <span class="m">README.md</span></div>
+            <div><span class="g">-rw-r--r--</span>  <span class="r">wezterm.lua</span>  <span class="bl">build</span></div>
+            <div class="pline" style="margin-top:6px"><span class="u">user@wezterm</span>:<span class="p">~</span>$ <span class="cmd">git status</span></div>
+            <div><span class="g">On branch main</span> · <span class="y">nothing to commit</span></div>
+            <div class="pline" style="margin-top:6px"><span class="u">user@wezterm</span>:<span class="p">~</span>$ <span class="cmd">npm run dev</span></div>
+            <div><span class="c">VITE</span> ready in <span class="m">312</span> ms</div>
+            <div class="pline" style="margin-top:6px"><span class="u">user@wezterm</span>:<span class="p">src</span>$ <span class="cursor" id="termCursor">█</span></div>
+          </div>
+        </div>
+      </div>
+      <p class="preview-note" id="previewNote">提示：透明度效果通过底层「桌面」透出呈现。</p>
+    </aside>
+  </div>
+
+  <!-- 录制按键遮罩 -->
+  <div id="captureOverlay" class="capture-overlay hidden">
+    <div class="capture-box">
+      <h3>请按下要绑定的按键</h3>
+      <p id="captureText">按下组合键，例如 Ctrl + V …</p>
+      <p class="help">按 Esc 取消</p>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
