@@ -18,7 +18,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/BaiWoww/wezterm-config-tool.git"
+    "url": "https://github.com/BaiWoww/wezterm_user_defined.git"
   },
   "devDependencies": {
     "luaparse": "^0.3.1"
