@@ -1,6 +1,12 @@
 # 依赖
 node_modules/
 
+# 打包产物（Electron / NSIS 安装包）
+dist/
+release/
+out/
+*.nsis/
+
 # 本机 E2E 测试产物 / WezTerm 备份
 *.bak
 wezterm.lua

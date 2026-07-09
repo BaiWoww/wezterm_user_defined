@@ -525,12 +525,13 @@ document.addEventListener('keydown', e => {
 function handleImport(text, fileName) {
   try {
     state = parseLua(text);
-    bgObjectUrl = null; // 导入的路径无法在浏览器内直接预览，需重新选择图片
+    // 桌面端：导入的背景图绝对路径可直接转 file:// 用于预览
+    bgObjectUrl = state.appearance.bgImage ? window.api.fileUrl(state.appearance.bgImage) : null;
     syncInputsFromState();
     updatePreview();
     updateExportPreview();
     const importedImg = state.appearance.bgImage;
-    $('bgImageHelp').textContent = importedImg ? ('已读取背景图路径：' + importedImg + '（浏览器内无法预览本地图片；已用后端校验该路径）') : '';
+    $('bgImageHelp').textContent = importedImg ? ('已读取背景图路径：' + importedImg) : '';
     if (importedImg) verifyBgPath(importedImg);   // 校验导入的背景图真实路径是否有效
     showStatus('已成功导入 ' + (fileName || '配置') + '，共解析 ' + state.keys.length + ' 条快捷键。', true);
   } catch (err) {
@@ -542,91 +543,44 @@ function showStatus(msg, ok) {
   const el = $('status'); el.textContent = msg; el.className = 'status ' + (ok ? 'ok' : 'err');
 }
 
-function download(filename, content) {
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
+// 另存为（原生对话框）：选择路径后写入（主进程自动备份原文件）
 async function saveToFile(content) {
   const filename = ($('targetPath').value || '').split(/[\\/]/).pop() || 'wezterm.lua';
   try {
-    if (window.showSaveFilePicker) {
-      const handle = await window.showSaveFilePicker({ suggestedName: filename, types: [{ description:'Lua', accept:{'text/plain':['.lua'] } }] });
-      const w = await handle.createWritable(); await w.write(content); await w.close();
-      showStatus('已保存到：' + handle.name, true); return;
-    }
-  } catch (e) { if (e.name === 'AbortError') return; }
-  download('wezterm.lua', content);
-  showStatus('当前浏览器不支持直接写文件，已触发下载。可将文件放到：' + ($('targetPath').value || '~/.wezterm.lua'), true);
-}
-
-/* ============================================================
- * 程序匹配：链接 WT（后端优先，浏览器回退）
- *   后端模式：通过 /api/detect、/api/resolve、/api/write 直接操作本机文件
- *   浏览器回退：File System Access API（window.showDirectoryPicker）
- * ============================================================ */
-const matchState = {
-  mode: 'backend',      // 'backend' | 'browser'
-  configPath: null,     // 后端模式下的目标文件绝对路径
-  installPath: '',      // 检测到的安装目录
-  // —— 以下为浏览器回退模式使用 ——
-  dirHandle: null,
-  parentHandle: null,
-  targetName: null,
-  targetHandle: null,
-  found: false,
-};
-
-/* ---------- 路径辅助（前端无 node path） ---------- */
-function dirOf(p) { const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')); return i < 0 ? p : p.slice(0, i); }
-function baseOf(p) { const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')); return i < 0 ? p : p.slice(i + 1); }
-
-/* ---------- 后端 API 客户端 ---------- */
-// 关键：当页面以 file:// 直接打开时，相对路径 /api/... 会解析为 file:///api/... 而失败。
-// 因此后端模式统一使用绝对地址（默认 127.0.0.1:8765）；若页面本身由后端以 http(s) 提供，
-// 则同源相对路径也可工作。
-function apiBase() {
-  if (location.protocol === 'file:') return 'http://127.0.0.1:8765';
-  if (location.hostname === '127.0.0.1' || location.hostname === 'localhost') return '';
-  return 'http://127.0.0.1:8765'; // 经由其它代理/域名打开时，回退到本机后端默认地址
-}
-async function apiGet(url) {
-  const r = await fetch(apiBase() + url, { headers: { 'Accept': 'application/json' } });
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
-}
-async function apiPost(url, body) {
-  const r = await fetch(apiBase() + url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
-}
-
-// 测试后端连接，更新卡片内的连接状态提示
-async function pingBackend() {
-  const el = $('pingStatus');
-  el.textContent = '连接中…';
-  el.style.color = '';
-  try {
-    await apiGet('/api/ping');
-    el.textContent = '✅ 后端已连接（' + apiBase() + '）';
-    el.style.color = 'var(--accent)';
-    return true;
+    const p = await window.api.saveFile({ title: '保存 wezterm.lua', defaultPath: filename, filters: [{ name: 'Lua 配置', extensions: ['lua'] }] });
+    if (!p) return; // 用户取消
+    const res = await window.api.write(p, content);
+    if (res.error) throw new Error(res.error);
+    showStatus('已保存到：' + p + (res.backup ? '（已备份原文件 ' + baseOf(res.backup) + '）' : ''), true);
   } catch (e) {
-    el.textContent = '❌ 无法连接后端：' + e.message;
-    el.style.color = 'var(--danger)';
-    return false;
+    showStatus('保存失败：' + e.message, false);
   }
 }
 
-// 校验背景图真实路径是否存在（需后端，file:// 下回退为静默）
+/* ============================================================
+/* ============================================================
+ * 程序匹配：链接 WezTerm（桌面原生实现）
+ *   全部经由 window.api 调用主进程（具备 Node 文件系统能力）：
+ *   - detect / resolve：自动定位安装与配置文件
+ *   - write：写入真实配置（主进程自动时间戳备份）
+ *   - pickFile / pickDirectory / saveFile：原生对话框，替代浏览器受限 API
+ * ============================================================ */
+const matchState = {
+  configPath: null,   // 目标文件绝对路径
+  installPath: '',    // 检测到的安装目录
+  found: false,
+};
+
+/* ---------- 路径辅助（纯前端） ---------- */
+function dirOf(p) { const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')); return i < 0 ? p : p.slice(0, i); }
+function baseOf(p) { const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')); return i < 0 ? p : p.slice(i + 1); }
+
+// 校验背景图真实路径是否存在
 async function verifyBgPath(p) {
   const help = $('bgImageHelp');
   if (!p) { help.textContent = ''; help.style.color = ''; return; }
   try {
-    const r = await apiGet('/api/stat?path=' + encodeURIComponent(p));
+    const r = await window.api.stat(p);
     if (r.exists && r.isFile) {
       help.textContent = '✅ 背景图路径有效，真实终端可正确加载';
       help.style.color = 'var(--accent)';
@@ -634,7 +588,10 @@ async function verifyBgPath(p) {
       help.textContent = '⚠️ 该路径不存在或不是文件，真实终端将无法加载背景';
       help.style.color = 'var(--danger)';
     }
-  } catch (e) { /* 后端不可达：不做校验提示 */ }
+  } catch (e) {
+    help.textContent = '⚠️ 无法校验路径：' + e.message;
+    help.style.color = 'var(--danger)';
+  }
 }
 
 function applyMatchUIFound(r, found) {
@@ -647,20 +604,20 @@ function applyMatchUIFound(r, found) {
   $('applyMatchBtn').disabled = false;
 }
 
-// 自动检测 WT 安装与配置（后端）
+// 自动检测 WT 安装与配置
 async function detectMatch() {
   try {
-    const r = await apiGet('/api/detect');
+    const r = await window.api.detect();
     if (r.error) throw new Error(r.error);
-    matchState.mode = 'backend';
     matchState.configPath = r.configPath || null;
     matchState.installPath = r.installPath || '';
+    matchState.found = r.found;
     if (r.configPath) {
       applyMatchUIFound(r, r.found);
       if (r.found) {
         showStatus('已自动检测并定位 ' + r.configPath + '，已载入现有配置。', true);
       } else if (r.recommended) {
-        showStatus('未找到现有配置，将按 WezTerm 官方推荐在 ' + r.configPath + ' 新建；也可放在与 wezterm.exe 同目录的 ' + (r.installPath || '安装目录') + '\\wezterm.lua。点击「应用到程序」即可创建。', false);
+        showStatus('未找到现有配置，将按 WezTerm 官方推荐在 ' + r.configPath + ' 新建；也可放在与 wezterm.exe 同目录。点击「应用到程序」即可创建。', false);
       } else {
         showStatus('未找到配置文件，将新建 ' + r.configPath + '。', false);
       }
@@ -670,183 +627,52 @@ async function detectMatch() {
       showStatus('未检测到 WT 配置文件，请在上方手动填写安装 / 配置路径后点击「定位」。', false);
     }
   } catch (e) {
-    // 后端不可达 → 回退到浏览器目录选择器
-    matchState.mode = 'browser';
-    if (window.showDirectoryPicker) {
-      showStatus('未连接本地后端，已切换为浏览器目录选择器（需 Chromium 内核浏览器）。', false);
-      pickInstallDir();
-    } else {
-      showStatus('无法连接本地后端（' + e.message + '）。请确认：① 已运行 node server.js；② 本页通过 http://127.0.0.1:8765 打开（而非双击本地文件）；③ 后端与浏览器在同一台机器上。', false);
-    }
+    showStatus('检测失败：' + e.message, false);
   }
 }
 
-// 按给定路径定位配置（后端）
+// 按给定路径定位配置
 async function resolveMatch(input) {
   try {
-    const r = await apiPost('/api/resolve', { path: input || '' });
+    const r = await window.api.resolve(input || '');
     if (r.error) { showStatus('定位失败：' + r.error, false); return; }
-    matchState.mode = 'backend';
     matchState.configPath = r.configPath;
     matchState.installPath = r.installPath || '';
+    matchState.found = r.found;
     applyMatchUIFound(r, r.found);
     showStatus(r.found ? ('已定位 ' + r.configPath + '，已载入现有配置。') : ('未找到配置文件，将新建 ' + r.configPath), r.found);
   } catch (e) {
-    matchState.mode = 'browser';
-    showStatus('无法连接本地后端（' + e.message + '）。请运行 node server.js 后重试。', false);
+    showStatus('定位失败：' + e.message, false);
   }
 }
 
-// 通过后端写入配置（写入前由后端自动备份）
-async function applyViaBackend() {
+// 通过主进程写入配置（写入前由主进程自动备份）
+async function applyMatch() {
   if (!matchState.configPath) { showStatus('请先自动检测或定位配置文件。', false); return; }
   const btn = $('applyMatchBtn'); btn.disabled = true;
   try {
     const lua = generateLua();
-    const r = await apiPost('/api/write', { configPath: matchState.configPath, content: lua });
+    const r = await window.api.write(matchState.configPath, lua);
     if (r.error) throw new Error(r.error);
     const fileInput = $('matchTargetFile');
     fileInput.classList.remove('missing');
     fileInput.classList.add('matched');
-    showStatus('✅ 已通过后端写入 ' + r.configPath + '（' + (r.lines || lua.split('\n').length) + ' 行）'
+    showStatus('✅ 已写入 ' + r.configPath + '（' + (r.lines || lua.split('\n').length) + ' 行）'
       + (r.backup ? '，原文件已备份为 ' + baseOf(r.backup) : '（新建文件，无备份）') + '。', true);
   } catch (e) {
     showStatus('❌ 写入失败：' + e.message + '。原文件未被修改。', false);
   } finally { btn.disabled = false; }
 }
 
-// 统一入口：按当前模式分发
-async function applyMatch() {
-  if (matchState.mode === 'backend') return applyViaBackend();
-  return applyToProgram();
-}
-
-/* ---------- 浏览器回退：File System Access API ---------- */
-function isTargetName(name) {
-  if (name === 'wezterm.lua') return true;
-  if (name === '.wezterm.lua') return true;
-  if (/\.wezterm\.lua$/.test(name)) return true;
-  return false;
-}
-
-// 在目录中递归查找目标配置文件（限制深度，跳过无关目录）
-async function findTargetFiles(dir, depth, base) {
-  if (depth > 3) return [];
-  const out = [];
+// 选择并导入已有的 wezterm.lua（原生对话框）
+async function pickLuaAndImport() {
   try {
-    for await (const [name, handle] of dir.entries()) {
-      if (name === 'node_modules' || name === '.git' || name === '.cache') continue;
-      if (handle.kind === 'file') {
-        if (isTargetName(name)) out.push({ name, handle, parentHandle: dir, relPath: base + name });
-      } else if (handle.kind === 'directory' && depth < 3) {
-        const sub = await findTargetFiles(handle, depth + 1, base + name + '/');
-        out.push(...sub);
-      }
-    }
-  } catch (e) { /* 权限不足等异常：跳过该目录继续 */ }
-  return out;
-}
-
-// 选择 WT 安装 / 配置目录，并自动定位目标文件
-async function pickInstallDir() {
-  if (!window.showDirectoryPicker) {
-    showStatus('当前浏览器不支持目录访问（需基于 Chromium 内核的浏览器，如 Edge / Chrome，且通过 https 或 localhost 打开）。请改用上方「保存到文件」手动写入。', false);
-    return;
-  }
-  const dirInput = $('matchDirName'), fileInput = $('matchTargetFile'), applyBtn = $('applyMatchBtn');
-  try {
-    const dirHandle = await window.showDirectoryPicker();
-    matchState.dirHandle = dirHandle;
-    dirInput.value = '📁 ' + dirHandle.name;
-    fileInput.value = '自动定位中…';
-    fileInput.classList.remove('matched', 'missing');
-    applyBtn.disabled = true;
-
-    const matches = await findTargetFiles(dirHandle, 0, '');
-    if (matches.length) {
-      matches.sort((a, b) => a.relPath.length - b.relPath.length); // 优先选择层级最浅的
-      const m = matches[0];
-      matchState.parentHandle = m.parentHandle;
-      matchState.targetName = m.name;
-      matchState.targetHandle = m.handle;
-      matchState.found = true;
-      dirInput.value = '📁 ' + dirHandle.name;
-      fileInput.value = dirHandle.name + '/' + m.relPath;
-      fileInput.classList.add('matched');
-
-      // 载入现有配置：捕获保留行（preserved），保证写入非破坏式
-      const text = await m.handle.getFile().then(f => f.text());
-      handleImport(text, m.name);
-      applyBtn.disabled = false;
-
-      const extra = matches.length > 1
-        ? ('（共发现 ' + matches.length + ' 个候选，已选择层级最浅的 ' + m.relPath + '）')
-        : '';
-      showStatus('已定位配置文件 ' + m.name + '，并已载入现有配置，可修改后点击「应用到程序」。' + extra, true);
-    } else {
-      // 未找到：提议在该目录新建 wezterm.lua
-      matchState.parentHandle = dirHandle;
-      matchState.targetName = 'wezterm.lua';
-      matchState.targetHandle = null;
-      matchState.found = false;
-      dirInput.value = '📁 ' + dirHandle.name;
-      fileInput.value = dirHandle.name + '/wezterm.lua（新建）';
-      fileInput.classList.add('missing');
-      showStatus('未在所选目录中找到 wezterm 配置文件，点击「应用到程序」将在该目录新建 wezterm.lua。', false);
-      applyBtn.disabled = false;
-    }
+    const r = await window.api.pickFile({ title: '导入 wezterm.lua', filters: [{ name: 'Lua 配置', extensions: ['lua', 'luarc'] }] });
+    if (!r) return;
+    const text = await window.api.readText(r.path);
+    handleImport(text, r.name);
   } catch (e) {
-    if (e.name === 'AbortError') return; // 用户取消选择
-    showStatus('选择目录失败：' + e.message, false);
-  }
-}
-
-// 浏览器回退：将当前配置直接写入目标文件（写入前自动备份原文件）
-async function applyToProgram() {
-  if (!matchState.parentHandle || !matchState.targetName) {
-    showStatus('请先点击「选择 WT 安装路径」定位配置文件。', false);
-    return;
-  }
-  const fileInput = $('matchTargetFile'), applyBtn = $('applyMatchBtn');
-  applyBtn.disabled = true;
-  try {
-    // 新建场景：确保目标文件句柄存在
-    if (!matchState.targetHandle) {
-      try {
-        matchState.targetHandle = await matchState.parentHandle.getFileHandle(matchState.targetName, { create: true });
-      } catch (e) { throw new Error('无法创建文件：' + e.message); }
-    }
-    // 必要时请求读写权限
-    if (matchState.targetHandle.requestPermission) {
-      try { await matchState.targetHandle.requestPermission({ mode: 'readwrite' }); } catch (e) { /* 忽略，交由后续写操作抛出明确错误 */ }
-    }
-
-    // 读取当前内容，用于备份
-    let current = '';
-    try { const f = await matchState.targetHandle.getFile(); current = await f.text(); } catch (e) { current = ''; }
-
-    const lua = generateLua();
-
-    // 修改前备份原文件（带时间戳，避免覆盖历史备份）
-    const ts = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
-    const bakName = matchState.targetName + '.bak-' + ts;
-    const bakHandle = await matchState.parentHandle.getFileHandle(bakName, { create: true });
-    const bw = await bakHandle.createWritable();
-    await bw.write(current || '-- (原文件为空或新建)');
-    await bw.close();
-
-    // 写入新配置
-    const w = await matchState.targetHandle.createWritable();
-    await w.write(lua);
-    await w.close();
-
-    fileInput.classList.remove('missing');
-    fileInput.classList.add('matched');
-    showStatus('✅ 已成功写入 ' + matchState.targetName + '（' + lua.split('\n').length + ' 行）。原文件已备份为 ' + bakName + '。', true);
-  } catch (e) {
-    showStatus('❌ 写入失败：' + e.message + '。原文件未被修改。', false);
-  } finally {
-    applyBtn.disabled = false;
+    showStatus('导入失败：' + e.message, false);
   }
 }
 
@@ -887,7 +713,7 @@ function loadSample() {
 /* ============================================================
  * 初始化
  * ============================================================ */
-function init() {
+async function init() {
   // 下拉数据
   const fl = $('fontList'); COMMON_FONTS.forEach(f => { const o = document.createElement('option'); o.value = f; fl.appendChild(o); });
   const sl = $('schemeList'); SCHEME_NAMES.forEach(s => { const o = document.createElement('option'); o.value = s; sl.appendChild(o); });
@@ -914,22 +740,21 @@ function init() {
   bindRange('saturation', 'saturation', 'appearance');
   bindRange('hue', 'hue', 'appearance');
 
-  // 背景图片选择
-  $('bgImageBtn').addEventListener('click', () => $('bgImageFile').click());
-  $('bgImageFile').addEventListener('change', e => {
-    const f = e.target.files[0]; if (!f) return;
-    if (bgObjectUrl) URL.revokeObjectURL(bgObjectUrl);
-    bgObjectUrl = URL.createObjectURL(f);          // 仅用于浏览器内预览
-    state.appearance.bgImageName = f.name;
-    if (f.path) {                                  // Electron 等桌面环境可拿到本机真实路径
-      state.appearance.bgImage = f.path;
-      $('bgImagePath').value = f.path;
-      verifyBgPath(f.path);
-    } else {
-      // 纯浏览器无法获取真实路径：预览可用，但真实终端需在输入框填写绝对路径
-      $('bgImageHelp').textContent = '预览已更新（' + f.name + '）。浏览器无法读取本机真实路径，请在上方输入框填写该图片的绝对路径（如 C:\\Users\\...\\' + f.name + '），真实终端才能正确加载背景。';
+  // 背景图片选择（原生对话框，直接拿到本机真实路径与 file:// 预览 URL）
+  $('bgImageBtn').addEventListener('click', async () => {
+    try {
+      const r = await window.api.pickFile({ title: '选择背景图片', filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] }] });
+      if (!r) return;
+      state.appearance.bgImage = r.path;
+      state.appearance.bgImageName = r.name;
+      bgObjectUrl = r.fileUrl;                     // 直接用于预览（桌面端允许 file:// 加载）
+      $('bgImagePath').value = r.path;
+      $('bgImageHelp').textContent = '预览已更新（' + r.name + '）';
+      updatePreview(); updateExportPreview();
+      verifyBgPath(r.path);
+    } catch (e) {
+      showStatus('选择图片失败：' + e.message, false);
     }
-    updatePreview(); updateExportPreview();
   });
   // 真实绝对路径以文本框为准（生成配置时使用），并实时校验路径是否存在
   $('bgImagePath').addEventListener('change', e => {
@@ -957,30 +782,30 @@ function init() {
     renderKeys(); updateExportPreview();
   });
 
-  // 导入
-  $('importBtn').addEventListener('click', () => $('importFile').click());
-  $('ioImportBtn').addEventListener('click', () => $('importFile').click());
-  $('importFile').addEventListener('change', e => {
-    const f = e.target.files[0]; if (!f) return;
-    const r = new FileReader();
-    r.onload = () => handleImport(r.result, f.name);
-    r.readAsText(f);
-    e.target.value = '';
-  });
+  // 导入（原生对话框）
+  $('importBtn').addEventListener('click', pickLuaAndImport);
+  $('ioImportBtn').addEventListener('click', pickLuaAndImport);
   $('sampleBtn').addEventListener('click', loadSample);
 
-  // 程序匹配（后端直连 WT，浏览器回退）
+  // 程序匹配（桌面原生：自动检测 / 定位 / 应用到程序）
   $('detectBtn').addEventListener('click', detectMatch);
   $('resolveBtn').addEventListener('click', () => resolveMatch($('matchPathInput').value));
   $('applyMatchBtn').addEventListener('click', applyMatch);
-  $('pingBtn').addEventListener('click', pingBackend);
-  pingBackend(); // 进入页面即探测后端连通性
+
+  // 原生窗口控制
+  $('winMin').addEventListener('click', () => window.api.win.minimize());
+  $('winMax').addEventListener('click', async () => {
+    await window.api.win.toggleMaximize();
+    const max = await window.api.win.isMaximized();
+    $('winMax').textContent = max ? '🗗' : '▢';
+  });
+  $('winClose').addEventListener('click', () => window.api.win.close());
 
   // 导出
   const doExport = () => { const lua = generateLua(); updateExportPreview(); return lua; };
-  $('downloadBtn').addEventListener('click', () => { download('wezterm.lua', doExport()); showStatus('已生成并下载 wezterm.lua', true); });
-  $('dlBtn2').addEventListener('click', () => { download('wezterm.lua', doExport()); showStatus('已下载 wezterm.lua', true); });
-  $('saveBtn').addEventListener('click', () => { saveToFile(doExport()); });
+  $('downloadBtn').addEventListener('click', () => saveToFile(doExport()));
+  $('dlBtn2').addEventListener('click', () => saveToFile(doExport()));
+  $('saveBtn').addEventListener('click', () => saveToFile(doExport()));
   $('copyBtn').addEventListener('click', () => {
     const lua = doExport();
     navigator.clipboard.writeText(lua).then(() => showStatus('配置已复制到剪贴板', true)).catch(() => showStatus('复制失败，请手动选择文本复制', false));
@@ -993,13 +818,16 @@ function init() {
     showStatus('已恢复默认设置', true);
   });
 
-  // 默认目标路径
-  const user = (typeof process !== 'undefined' && process.env && process.env.USERPROFILE) || '';
-  $('targetPath').value = user ? (user + '\\.wezterm.lua') : 'C:\\Users\\你的用户名\\.wezterm.lua';
+  // 默认目标路径 + 启动即自动检测本机现有配置
+  try {
+    const r = await window.api.detect();
+    if (r && r.configPath) $('targetPath').value = r.configPath;
+  } catch (e) { /* 忽略检测失败，使用空目标路径 */ }
 
   syncInputsFromState();
   updatePreview();
   updateExportPreview();
+  detectMatch(); // 进入页面即自动检测并载入本机 WezTerm 配置
 }
 
 document.addEventListener('DOMContentLoaded', init);

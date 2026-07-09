@@ -1,6 +1,6 @@
-# WezTerm 配置可视化工具
+# WezTerm 配置可视化工具（Electron 桌面版）
 
-浏览器内可视化配置、实时预览 **WezTerm** 终端，并通过一个**零依赖的本地后端**直接管理你机器上真实的 `wezterm.lua`：自动定位 WezTerm 安装目录与配置文件、一键套用、自动备份。
+一个 **Windows 原生桌面应用**（基于 [Electron](https://www.electronjs.org/)）的可视化 WezTerm 配置编辑器：可视化配置、实时预览，并**直接读写本机真实的 `wezterm.lua`**——自动定位 WezTerm 安装目录与配置文件、一键套用、写入前自动备份。
 
 > 本项目专注于「可视化配置 + 真实套用」，生成的配置严格遵循 [WezTerm 官方配置格式](https://wezfurlong.org/wezterm/)，可直接被终端加载。
 
@@ -13,14 +13,15 @@
   - 字体 / 字号 / 配色方案 / 窗口行列 / 窗口装饰
   - 光标：样式（Block / Bar / Underline）、粗细、**闪烁**（折叠进 `default_cursor_style` 的 `Blinking*` / `Steady*` 前缀）、闪烁开关
   - 快捷键：粘贴 / 复制 / 停止 / 上一·下一标签页 / 新建·关闭标签页 / 分屏，可自定义增删
-- **实时预览**：所见即所得的终端外观模拟，配置即改即看
+- **实时预览**：所见即所得的终端外观模拟，配置即改即看（桌面端可直接用 `file://` 预览本地背景图）
 - **程序匹配（核心）**
   - 自动检测本机 WezTerm 安装路径（PATH / Microsoft Store / scoop / Program Files）
   - 按官方解析顺序定位配置文件（`与 exe 同目录` → `$HOME/.wezterm.lua` → `$HOME/.config/wezterm/...`）
   - 一键「应用到程序」：写入真实配置并**时间戳备份**原文件
-  - 后端连通性自检（ping），离线时自动回退浏览器 File System Access API
-- **导入 / 导出**：导入已有 `wezterm.lua` 解析回填，导出下载 `.lua` 文件
-- **真实端到端校验**：`gen_test.js` 用工具真实的 `generateLua()` 生成配置，经 `luaparse` 做 Lua 语法校验，确认动作名合法后才写回
+  - 启动即自动检测并载入本机现有配置
+- **导入 / 导出**：通过**原生文件对话框**导入已有 `wezterm.lua` 解析回填，另存为到任意路径
+- **原生窗口管理**：应用自带标题栏，支持最小化 / 最大化 / 还原 / 关闭
+- **真实端到端校验**：`gen_test.js` 用工具真实的 `generateLua()` 生成配置，经 `luaparse` 做 Lua 语法校验
 
 ---
 
@@ -28,58 +29,84 @@
 
 | 部分 | 技术 | 说明 |
 | --- | --- | --- |
-| 前端 | 原生 HTML + CSS + JavaScript（无构建、无框架） | `index.html` / `styles.css` / `app.js` |
-| 后端 | Node.js 内置模块（`http` / `fs` / `path` / `os`），**零第三方依赖** | `server.js` |
+| 主进程 | Electron `main.js` + 纯 Node 模块 `wt-fs.js` | 窗口管理、IPC、本机文件系统 / 检测逻辑（零第三方运行时依赖） |
+| 预加载 | Electron `preload.js` | `contextBridge` 安全桥，向渲染进程暴露最小权限 API |
+| 渲染进程 | 原生 HTML + CSS + JavaScript（无构建、无框架） | `index.html` / `styles.css` / `app.js` |
+| 打包 | `electron-builder`（NSIS） | 生成 Windows 安装包 `.exe` |
 | 测试 | Node.js `vm` + DOM 桩运行真实 `generateLua()`，`luaparse` 校验 | `gen_test.js`（devDependency） |
+
+> 与原浏览器版的区别：移除了 HTTP 后端（`server.js`）与浏览器受限的 File System Access API，所有文件操作改由主进程（Node）通过 IPC 完成，并改用原生对话框——完全脱离浏览器载体。
 
 ---
 
-## 🚀 快速开始
+## 🚀 快速开始（开发）
 
 ```bash
-# 1. 启动本地后端（静态服务 + 配置管理 API）
-node server.js
-# 或
-npm start
+# 安装依赖（electron / electron-builder / luaparse）
+npm install
 
-# 2. 浏览器打开（必须经此地址，不能用 file:// 直接打开 index.html）
-http://127.0.0.1:8765
+# 以桌面应用方式启动（开发模式）
+npm start
 ```
 
-> ⚠️ 必须通过 `http://127.0.0.1:8765` 访问。以 `file://` 打开时前端无法调用本地后端（仅能用浏览器回退方案）。
+> 提示：应用内按 `Ctrl + Shift + I` 可打开 DevTools 调试。
+
+### 打包为 Windows 安装包
+
+```bash
+# 生成 NSIS 安装包（输出到 dist/，如 WezTerm-Config-Tool-Setup-2.0.0.exe）
+npm run dist
+```
+
+`npm run pack` 可仅生成未打包的目录（`dist/win-unpacked`），便于直接运行验证。
+
+---
 
 ### 目录结构
 
 ```
 wezterm-config-tool/
-├── index.html      # 页面结构（可视化配置 + 导入导出 + 程序匹配）
-├── styles.css      # 样式
-├── app.js          # 前端逻辑：状态、生成 Lua、预览、导入解析、程序匹配
-├── server.js       # 零依赖后端：静态服务 + 配置检测 / 解析 / 写入 API
+├── main.js         # Electron 主进程：窗口 + IPC + 窗口控制
+├── preload.js      # 预加载：contextBridge 安全桥（window.api）
+├── wt-fs.js        # 纯 Node：本机文件系统 / WezTerm 检测 / 读写（含备份）
+├── index.html      # 页面结构（原生标题栏 + 可视化配置 + 导入导出 + 程序匹配）
+├── styles.css      # 样式（含自定义标题栏）
+├── app.js          # 渲染进程逻辑：状态、生成 Lua、预览、导入解析、程序匹配
 ├── gen_test.js     # 回归测试：真实生成 + luaparse 校验（开发用）
-├── package.json
+├── tools/
+│   └── make-icon.js  # 生成应用图标 build/icon.ico / icon.png（纯 Node）
+├── build/
+│   ├── icon.ico      # 窗口与安装包图标
+│   └── icon.png
+├── package.json    # 含 electron-builder 打包配置
 ├── .gitignore
 └── LICENSE
 ```
 
 ---
 
-## 🔌 后端 API
+## 🔌 渲染进程可用的原生 API（`window.api`）
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/api/ping` | 健康检查 |
-| GET | `/api/stat?path=...` | 文件是否存在 / 大小 / 修改时间（用于背景图校验） |
-| GET | `/api/detect` | 检测安装路径与配置文件路径 |
-| POST | `/api/resolve` | 解析某个目录下的目标配置文件路径 |
-| POST | `/api/write` | 写入配置（自动时间戳备份原文件） |
+| 方法 | 说明 |
+| --- | --- |
+| `ping()` | 健康检查 |
+| `stat(path)` | 文件是否存在 / 是否为文件 / 大小 |
+| `detect()` | 检测安装路径与配置文件路径（含读取现有内容） |
+| `resolve(input)` | 解析某个目录下的目标配置文件路径 |
+| `readText(path)` | 读取文本（用于导入） |
+| `write(path, content)` | 写入配置（自动时间戳备份原文件） |
+| `pickFile({title, filters})` | 原生「打开文件」对话框，返回 `{ path, name, fileUrl }` |
+| `pickDirectory()` | 原生「选择文件夹」对话框 |
+| `saveFile({title, defaultPath, filters})` | 原生「另存为」对话框，返回路径 |
+| `fileUrl(path)` | 绝对路径 → `file://` URL（用于本地图片预览） |
+| `win.minimize()` / `win.toggleMaximize()` / `win.close()` / `win.isMaximized()` | 原生窗口控制 |
 
 ---
 
 ## 🧪 开发 / 回归测试
 
 ```bash
-npm install        # 安装 devDependency：luaparse
+npm install        # 安装 devDependency：luaparse / electron / electron-builder
 npm test           # 运行 gen_test.js，luaparse 校验生成的 wezterm.lua
 ```
 

@@ -1,10 +1,13 @@
 {
   "name": "wezterm-config-tool",
-  "version": "1.0.0",
-  "description": "WezTerm 配置可视化工具：浏览器内可视化配置、实时预览，并通过零依赖本地后端管理真实终端配置（程序匹配 / 背景图 / 快捷键等）。",
+  "version": "2.0.0",
+  "description": "WezTerm 配置可视化工具：Electron 桌面应用（Windows 原生），可视化配置、实时预览，并直接读写本机真实 wezterm.lua。",
   "type": "commonjs",
+  "main": "main.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
     "test": "node gen_test.js"
   },
   "keywords": [
@@ -12,6 +15,8 @@
     "terminal",
     "config",
     "lua",
+    "electron",
+    "desktop",
     "gui"
   ],
   "author": "BaiWoww <q1092174474@163.com>",
@@ -21,9 +26,39 @@
     "url": "https://github.com/BaiWoww/wezterm_user_defined.git"
   },
   "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3",
     "luaparse": "^0.3.1"
   },
   "engines": {
     "node": ">=16"
+  },
+  "build": {
+    "appId": "com.baiwoww.weztermconfigtool",
+    "productName": "WezTerm 配置工具",
+    "executableName": "wezterm-config-tool",
+    "copyright": "Copyright © 2026 BaiWoww",
+    "files": [
+      "main.js",
+      "preload.js",
+      "wt-fs.js",
+      "index.html",
+      "app.js",
+      "styles.css",
+      "LICENSE"
+    ],
+    "win": {
+      "target": ["nsis"],
+      "icon": "build/icon.ico",
+      "sign": "tools/no-sign.js"
+    },
+    "nsis": {
+      "artifactName": "WezTerm-Config-Tool-Setup-${version}.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "WezTerm 配置工具"
+    }
   }
 }

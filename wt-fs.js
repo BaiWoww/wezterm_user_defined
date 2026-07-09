@@ -1,51 +1,18 @@
 'use strict';
 
 /* ============================================================
- * WezTerm 配置工具 — 本地后端
- * 作用：作为工具与 WT 终端之间的「链接层」，直接访问本机文件系统，
- *       自动定位 WezTerm 安装目录与配置文件，读取/写入并备份配置。
- * 零依赖：仅使用 Node.js 内置 http / fs / path / os 模块。
- * 运行：node server.js  →  http://127.0.0.1:8765
+ * WezTerm 配置工具 — 本机文件系统 / 检测逻辑（纯 Node，无 Electron 依赖）
+ * 该模块被主进程（main.js）通过 IPC 调用，也可被测试脚本直接 require。
  * ============================================================ */
 
-const http = require('http');
 const fs = require('fs/promises');
 const fss = require('fs');
 const path = require('path');
 const os = require('os');
 
+// 允许写入的「安全根目录」之一：应用自身目录（用于开发/测试回环）
 const ROOT = __dirname;
-const PORT = process.env.PORT || 8765;
 
-/* ---------- 静态服务 MIME ---------- */
-const MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.js':   'text/javascript; charset=utf-8',
-  '.css':  'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.lua':  'text/plain; charset=utf-8',
-  '.svg':  'image/svg+xml',
-  '.png':  'image/png',
-  '.ico':  'image/x-icon',
-};
-
-function sendJSON(res, code, obj) {
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
-  res.end(JSON.stringify(obj));
-}
-
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    let data = '';
-    req.on('data', c => { data += c; if (data.length > 5e6) req.destroy(); });
-    req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch (e) { reject(new Error('请求体不是合法 JSON')); } });
-    req.on('error', reject);
-  });
-}
-
-/* ============================================================
- * WezTerm 定位逻辑
- * ============================================================ */
 function getEnv(name) { return process.env[name] || ''; }
 function isTargetName(name) {
   return name === 'wezterm.lua' || name === '.wezterm.lua' || /\.wezterm\.lua$/.test(name);
@@ -119,7 +86,7 @@ async function scanForConfig(dir, depth) {
   }
   if (depth < 3) {
     for (const e of entries) {
-      if (e.isDirectory() && !['node_modules', '.git', '.cache', 'AppData', 'node_modules'].includes(e.name)) {
+      if (e.isDirectory() && !['node_modules', '.git', '.cache', 'AppData'].includes(e.name)) {
         const r = await scanForConfig(path.join(dir, e.name), depth + 1);
         if (r) return r;
       }
@@ -171,96 +138,48 @@ async function isSafeWriteTarget(p) {
   return allowed.some(d => p === d || p.startsWith(d + path.sep));
 }
 
-/* ============================================================
- * 静态文件服务
- * ============================================================ */
-async function serveStatic(req, res) {
-  let urlPath = decodeURIComponent(req.url.split('?')[0]);
-  if (urlPath === '/') urlPath = '/index.html';
-  const filePath = path.join(ROOT, urlPath);
-  if (!filePath.startsWith(ROOT)) { res.writeHead(403); res.end('Forbidden'); return; }
+async function statPath(p) {
   try {
-    const data = await fs.readFile(filePath);
-    const ext = path.extname(filePath).toLowerCase();
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
-    res.end(data);
+    const st = await fs.stat(p);
+    return { exists: true, isFile: st.isFile(), isDirectory: st.isDirectory(), size: st.size };
   } catch (e) {
-    res.writeHead(404); res.end('Not Found');
+    return { exists: false };
   }
 }
 
-/* ============================================================
- * 路由
- * ============================================================ */
-const server = http.createServer(async (req, res) => {
-  const url = req.url.split('?')[0];
-  try {
-    // 健康检查 / 连接测试
-    if (url === '/api/ping' && req.method === 'GET') {
-      return sendJSON(res, 200, { ok: true, ts: Date.now() });
-    }
-    // 校验文件是否存在（用于背景图等真实路径确认）
-    if (url === '/api/stat' && req.method === 'GET') {
-      const qIdx = req.url.indexOf('?');
-      const qs = qIdx >= 0 ? req.url.slice(qIdx + 1) : '';
-      const p = new URLSearchParams(qs).get('path') || '';
-      if (!p) return sendJSON(res, 400, { error: '缺少 path 参数' });
-      try {
-        const st = await fs.stat(p);
-        return sendJSON(res, 200, { exists: true, isFile: st.isFile(), isDirectory: st.isDirectory(), size: st.size });
-      } catch (e) {
-        return sendJSON(res, 200, { exists: false });
-      }
-    }
-    // 自动检测 WT 安装与配置
-    if (url === '/api/detect' && req.method === 'GET') {
-      const r = await resolvePath('');
-      if (r.configPath) {
-        try { r.content = await fs.readFile(r.configPath, 'utf8'); } catch (e) { r.content = ''; }
-      }
-      sendJSON(res, 200, r);
-      return;
-    }
-    // 按给定路径定位配置
-    if (url === '/api/resolve' && req.method === 'POST') {
-      const body = await readBody(req);
-      const r = await resolvePath(body.path || '');
-      if (r.configPath && r.found) {
-        try { r.content = await fs.readFile(r.configPath, 'utf8'); } catch (e) { r.content = ''; }
-      }
-      sendJSON(res, 200, r);
-      return;
-    }
-    // 写入配置（写入前自动备份原文件）
-    if (url === '/api/write' && req.method === 'POST') {
-      const body = await readBody(req);
-      const cfgPath = String(body.configPath || '');
-      const content = String(body.content || '');
-      if (!(await isSafeWriteTarget(cfgPath))) {
-        return sendJSON(res, 400, { error: '不允许写入该路径，仅支持用户主目录 / 项目目录 / ~/.config / WezTerm 安装目录下的 wezterm.lua' });
-      }
-      let backup = '';
-      try {
-        const st = await fs.stat(cfgPath);
-        if (st.isFile()) {
-          const ts = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
-          const bak = cfgPath + '.bak-' + ts;
-          await fs.copyFile(cfgPath, bak);
-          backup = bak;
-        }
-      } catch (e) { /* 文件不存在 → 新建场景，无需备份 */ }
-      await fs.mkdir(path.dirname(cfgPath), { recursive: true });
-      await fs.writeFile(cfgPath, content, 'utf8');
-      return sendJSON(res, 200, { ok: true, configPath: cfgPath, backup, lines: content.split('\n').length });
-    }
-    if (url.startsWith('/api/')) { sendJSON(res, 404, { error: '未知接口' }); return; }
-    await serveStatic(req, res);
-  } catch (e) {
-    sendJSON(res, 500, { error: e.message });
-  }
-});
+async function readConfig(p) {
+  const text = await fs.readFile(p, 'utf8');
+  return text;
+}
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log('[WezTerm 配置工具] 后端已启动 → http://127.0.0.1:' + PORT);
-  console.log('[WezTerm 配置工具] 用户主目录: ' + os.homedir());
-});
+// 写入配置（写入前自动备份原文件）；返回 { ok, configPath, backup, lines }
+async function writeConfig(configPath, content) {
+  if (!(await isSafeWriteTarget(configPath))) {
+    return { error: '不允许写入该路径，仅支持用户主目录 / 项目目录 / ~/.config / WezTerm 安装目录下的 wezterm.lua' };
+  }
+  let backup = '';
+  try {
+    const st = await fs.stat(configPath);
+    if (st.isFile()) {
+      const ts = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+      const bak = configPath + '.bak-' + ts;
+      await fs.copyFile(configPath, bak);
+      backup = bak;
+    }
+  } catch (e) { /* 文件不存在 → 新建场景，无需备份 */ }
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.writeFile(configPath, content, 'utf8');
+  return { ok: true, configPath, backup, lines: content.split('\n').length };
+}
+
+module.exports = {
+  isTargetName,
+  detectInstallPath,
+  detectConfigPath,
+  scanForConfig,
+  resolvePath,
+  isSafeWriteTarget,
+  statPath,
+  readConfig,
+  writeConfig,
+};

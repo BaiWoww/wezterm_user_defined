@@ -7,6 +7,16 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <!-- 原生自定义标题栏：拖动区域 + 最小化 / 最大化 / 关闭 -->
+  <div class="winbar" id="winbar">
+    <span class="winbar-title">⚡ WezTerm 配置工具</span>
+    <div class="winbar-controls">
+      <button id="winMin" class="winbtn" type="button" title="最小化" aria-label="最小化">—</button>
+      <button id="winMax" class="winbtn" type="button" title="最大化 / 还原" aria-label="最大化">▢</button>
+      <button id="winClose" class="winbtn close" type="button" title="关闭" aria-label="关闭">✕</button>
+    </div>
+  </div>
+
   <header class="topbar">
     <div class="brand">
       <span class="logo">⚡</span>
@@ -18,7 +28,6 @@
     <div class="topbar-actions">
       <button id="importBtn" class="btn ghost">导入 wezterm.lua</button>
       <button id="downloadBtn" class="btn primary">导出配置</button>
-      <input type="file" id="importFile" accept=".lua,.luarc,*.wezterm.lua" hidden />
     </div>
   </header>
 
@@ -45,10 +54,9 @@
             <label>背景图片</label>
             <div class="row">
               <input type="text" id="bgImagePath" placeholder="选择本地图片路径…" />
-              <button id="bgImageBtn" class="btn small">选择图片</button>
-            </div>
-            <input type="file" id="bgImageFile" accept="image/*" hidden />
-            <p class="help" id="bgImageHelp"></p>
+            <button id="bgImageBtn" class="btn small">选择图片</button>
+          </div>
+          <p class="help" id="bgImageHelp"></p>
           </div>
 
           <div class="field">
@@ -204,15 +212,12 @@
         <!-- 程序匹配：后端直连 WT 安装 -->
         <div class="card" id="matchCard">
           <h3>程序匹配（后端直连 WT）</h3>
-          <p class="help">通过本地后端（<code>node server.js</code>）直接访问本机 WezTerm：点击「自动检测」定位安装与配置文件，或手动填写路径后「定位」。写入前自动备份原文件，无需手动导出或覆盖旧文件。<br>⚠️ 请先运行 <code>node server.js</code>，并通过 <code>http://127.0.0.1:8765</code> 打开本页（直接双击打开本地文件会导致后端连接失败）。</p>
+          <p class="help">作为桌面应用，本工具直接调用本机文件系统访问 WezTerm：点击「自动检测」自动定位安装目录与配置文件，或手动填写路径后「定位」。写入前自动备份原文件，无需手动导出或覆盖。应用启动时会自动检测并载入本机现有配置。</p>
           <div class="row two">
             <button id="detectBtn" class="btn">自动检测 WT 路径</button>
             <button id="applyMatchBtn" class="btn primary" disabled>应用到程序</button>
           </div>
-          <div class="row" style="margin-top:8px">
-            <button id="pingBtn" class="btn small ghost">测试后端连接</button>
-            <span id="pingStatus" class="help" style="margin:0">未检测</span>
-          </div>
+          <p class="help" style="margin-top:8px">提示：写入会先自动备份原配置（带时间戳），可随时还原。</p>
           <div class="field" style="margin-top:12px">
             <label>WT 安装 / 配置路径（可手动填写目录或文件）</label>
             <div class="row">
